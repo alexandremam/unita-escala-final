@@ -60,3 +60,11 @@ export interface ShiftConfig {
   inicio: string; // e.g., "07:00"
   fim: string; // e.g., "19:00"
 }
+
+export interface DailyPresence {
+  id: string;
+  date: string; // YYYY-MM-DD
+  doctorID: string;
+  shiftType: '12h' | '6h-manha' | '6h-tarde';
+}
+

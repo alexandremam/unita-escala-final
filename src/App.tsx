@@ -4,8 +4,8 @@
  */
 
 import { useState, useEffect } from 'react';
-import { UserSession, Doctor, Escalation } from './types';
-import { initializeDatabase, helperGetDoctors, helperGetEscalations } from './data';
+import { UserSession, Doctor, Escalation, DailyPresence } from './types';
+import { initializeDatabase, helperGetDoctors, helperGetEscalations, helperGetDailyPresences } from './data';
 import Login from './components/Login';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -22,6 +22,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('agora');
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [escalations, setEscalations] = useState<Escalation[]>([]);
+  const [dailyPresences, setDailyPresences] = useState<DailyPresence[]>([]);
 
   // 1. Initialize databases on mount
   useEffect(() => {
@@ -39,7 +40,33 @@ export default function App() {
 
     setDoctors(helperGetDoctors());
     setEscalations(helperGetEscalations());
+    setDailyPresences(helperGetDailyPresences());
   }, []);
+
+  // Synchronize doctor.presente boolean based on dailyPresences for Today's date
+  useEffect(() => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const todaysDoctorIDs = dailyPresences
+      .filter(p => p.date === todayStr)
+      .map(p => p.doctorID);
+
+    setDoctors(prevDocs => {
+      let changed = false;
+      const updated = prevDocs.map(d => {
+        const isRostered = todaysDoctorIDs.includes(d.id);
+        if (d.presente !== isRostered) {
+          changed = true;
+          return { ...d, presente: isRostered };
+        }
+        return d;
+      });
+      if (changed) {
+        localStorage.setItem('unita_doctors', JSON.stringify(updated));
+        return updated;
+      }
+      return prevDocs;
+    });
+  }, [dailyPresences]);
 
   // Handler for user login
   const handleLoginSuccess = (newSession: UserSession) => {
@@ -83,6 +110,8 @@ export default function App() {
                 escalations={escalations}
                 setEscalations={setEscalations}
                 session={session}
+                dailyPresences={dailyPresences}
+                setDailyPresences={setDailyPresences}
               />
             )}
 
@@ -91,6 +120,8 @@ export default function App() {
                 doctors={doctors}
                 setDoctors={setDoctors}
                 session={session}
+                dailyPresences={dailyPresences}
+                setDailyPresences={setDailyPresences}
               />
             )}
 

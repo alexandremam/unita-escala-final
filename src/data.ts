@@ -1,4 +1,4 @@
-import { Doctor, SectorRoom, Escalation, AuditLog, ShiftConfig } from './types';
+import { Doctor, SectorRoom, Escalation, AuditLog, ShiftConfig, DailyPresence } from './types';
 
 // Let's create the 22 hospital rooms
 export const HOSPITAL_ROOMS: SectorRoom[] = [
@@ -215,6 +215,20 @@ export function initializeDatabase() {
     localStorage.setItem('unita_escalations', JSON.stringify(escalations));
   }
 
+  if (!localStorage.getItem('unita_daily_presences')) {
+    const doctors = JSON.parse(localStorage.getItem('unita_doctors') || '[]') as Doctor[];
+    const today = new Date().toISOString().split('T')[0];
+    const initialPresences = doctors
+      .filter(d => d.presente)
+      .map(d => ({
+        id: `pres-${d.id}-${today}`,
+        date: today,
+        doctorID: d.id,
+        shiftType: '12h' as const
+      }));
+    localStorage.setItem('unita_daily_presences', JSON.stringify(initialPresences));
+  }
+
   if (!localStorage.getItem('unita_audit')) {
     const logs: AuditLog[] = [
       {
@@ -277,3 +291,12 @@ export function helperGetShift(): ShiftConfig {
 export function helperSaveShift(shift: ShiftConfig) {
   localStorage.setItem('unita_shift', JSON.stringify(shift));
 }
+
+export function helperGetDailyPresences(): DailyPresence[] {
+  return JSON.parse(localStorage.getItem('unita_daily_presences') || '[]');
+}
+
+export function helperSaveDailyPresences(presences: DailyPresence[]) {
+  localStorage.setItem('unita_daily_presences', JSON.stringify(presences));
+}
+

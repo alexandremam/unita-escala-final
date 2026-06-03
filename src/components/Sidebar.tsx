@@ -1,6 +1,7 @@
 import { UserSession } from '../types';
 import { Menu, Clock, CalendarCheck, BarChart3, History, UserPlus } from 'lucide-react';
 import { useState } from 'react';
+import UnitaLogo from './UnitaLogo';
 
 type TabType = 'agora' | 'plantao' | 'relatorios' | 'auditoria' | 'plantonistas';
 
@@ -76,9 +77,7 @@ export default function Sidebar({ activeTab, setActiveTab, session }: SidebarPro
 
       {/* Footer hint */}
       <div className="p-4 border-t border-slate-800/60 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center font-bold text-blue-400 text-xs shrink-0">
-          U
-        </div>
+        <UnitaLogo size={32} className="rounded-full bg-slate-800 border border-slate-700/50 shadow-xs" />
         <div
           className={`transition-opacity duration-200 whitespace-nowrap ${
             isHovered ? 'opacity-100' : 'opacity-0 w-0 pointer-events-none'

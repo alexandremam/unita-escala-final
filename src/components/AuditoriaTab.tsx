@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { AuditLog, UserSession } from '../types';
 import { Fingerprint, Search, Calendar, BadgeAlert, AlertCircle, RefreshCw } from 'lucide-react';
+import UnitaLogo from './UnitaLogo';
 
 interface AuditoriaTabProps {
   session: UserSession;
@@ -44,15 +45,17 @@ export default function AuditoriaTab({ session }: AuditoriaTabProps) {
   return (
     <div className="space-y-6" id="auditoria-tab-container">
       {/* Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800 font-display flex items-center gap-2">
-            <Fingerprint className="h-5.5 w-5.5 text-slate-500" />
-            Trilha de Auditoria Geral
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Registro oficial de manipulações operacionais de escala, cadastros e cancelamentos
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200">
+        <div className="flex items-center gap-3">
+          <UnitaLogo size={32} className="p-1 rounded-lg bg-slate-50 border border-slate-100 shadow-3xs" />
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 font-display flex items-center gap-2">
+              Trilha de Auditoria Geral
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Registro oficial de manipulações operacionais de escala, cadastros e cancelamentos
+            </p>
+          </div>
         </div>
 
         <button

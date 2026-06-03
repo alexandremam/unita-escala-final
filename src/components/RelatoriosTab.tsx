@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Doctor, Escalation, UserSession } from '../types';
 import { Printer, CalendarDays, BarChart2, Table, Award, Hourglass, HelpCircle } from 'lucide-react';
 import { formatDurationPure } from '../utils';
+import UnitaLogo from './UnitaLogo';
 
 interface RelatoriosTabProps {
   doctors: Doctor[];
@@ -128,12 +129,14 @@ export default function RelatoriosTab({ doctors, escalations, session }: Relator
       
       {/* Filters HUD */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 no-print">
-        <div>
-          <h2 className="text-lg font-bold text-slate-800 font-display flex items-center gap-2">
-            <CalendarDays className="h-5 w-5 text-slate-500" />
-            Relatório de Produtividade Médica
-          </h2>
-          <p className="text-xs text-slate-500">Métricas consolidadas de horas e atos de anestesiologia</p>
+        <div className="flex items-center gap-3">
+          <UnitaLogo size={32} className="p-1 rounded-lg bg-slate-50 border border-slate-100 shadow-3xs" />
+          <div>
+            <h2 className="text-lg font-bold text-slate-800 font-display flex items-center gap-2">
+              Relatório de Produtividade Médica
+            </h2>
+            <p className="text-xs text-slate-500">Métricas consolidadas de horas e atos de anestesiologia</p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">

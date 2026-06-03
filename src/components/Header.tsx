@@ -1,5 +1,6 @@
 import { UserSession } from '../types';
-import { LogOut, User, Activity } from 'lucide-react';
+import { LogOut, User } from 'lucide-react';
+import UnitaLogo from './UnitaLogo';
 
 interface HeaderProps {
   session: UserSession;
@@ -13,16 +14,15 @@ export default function Header({ session, onLogout }: HeaderProps) {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           
           {/* Logo & Clinical Branding */}
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2 rounded-lg text-white shadow-sm">
-              <Activity className="h-5.5 w-5.5" />
-            </div>
+          <div className="flex items-center gap-4">
+            <UnitaLogo variant="horizontal" size={40} className="hover:opacity-90 transition-opacity" />
+            <div className="w-px h-8 bg-slate-200 hidden sm:block"></div>
             <div>
-              <h1 className="text-lg font-bold font-display tracking-tight text-slate-800">
-                Unitá Anestesia - Escala
-              </h1>
+              <h2 className="text-[10px] font-bold text-slate-400 font-mono tracking-widest uppercase mb-0.5">
+                Gestão de Escalas
+              </h2>
               {/* User Metadata directly under the title as specified */}
-              <div className="flex flex-wrap items-center gap-2 mt-0.5 text-xs text-slate-500">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <span>Usuário:</span>
                 <span className="font-semibold text-slate-700">{session.usuario}</span>
                 <span className="text-slate-300">|</span>

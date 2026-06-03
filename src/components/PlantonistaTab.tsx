@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Doctor, UserSession } from '../types';
 import { UserPlus, ToggleLeft, ToggleRight, Trash2, Mail, ShieldAlert, BadgeCheck, Phone, FileText, X } from 'lucide-react';
 import { logSystemEvent } from '../utils';
+import UnitaLogo from './UnitaLogo';
 
 interface PlantonistaTabProps {
   doctors: Doctor[];
@@ -115,11 +116,14 @@ export default function PlantonistaTab({ doctors, setDoctors, session }: Planton
   return (
     <div className="space-y-8" id="plantonistas-tab-container">
       {/* Title */}
-      <div>
-        <h2 className="text-xl font-bold text-slate-800 font-display">Controle de Médicos Plantonistas</h2>
-        <p className="text-xs text-slate-500 mt-1">
-          Painel confidencial de credenciamento e remoção de anestesiologistas
-        </p>
+      <div className="flex items-center gap-3 bg-white p-4 rounded-xl border border-slate-200">
+        <UnitaLogo size={36} className="p-1 rounded-lg bg-slate-50 border border-slate-100 shadow-3xs" />
+        <div>
+          <h2 className="text-xl font-bold text-slate-800 font-display">Controle de Médicos Plantonistas</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Painel confidencial de credenciamento e remoção de anestesiologistas
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

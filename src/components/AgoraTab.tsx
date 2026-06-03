@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Doctor, SectorRoom, Escalation, UserSession } from '../types';
+import { Doctor, SectorRoom, Escalation, UserSession, DailyPresence } from '../types';
 import {
   Users,
   CheckCircle,
@@ -33,6 +33,8 @@ interface AgoraTabProps {
   escalations: Escalation[];
   setEscalations: React.Dispatch<React.SetStateAction<Escalation[]>>;
   session: UserSession;
+  dailyPresences: DailyPresence[];
+  setDailyPresences: React.Dispatch<React.SetStateAction<DailyPresence[]>>;
 }
 
 export default function AgoraTab({
@@ -40,7 +42,9 @@ export default function AgoraTab({
   setDoctors,
   escalations,
   setEscalations,
-  session
+  session,
+  dailyPresences,
+  setDailyPresences
 }: AgoraTabProps) {
   // Navigation filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -72,6 +76,7 @@ export default function AgoraTab({
 
   // Real-time room click finalization popup
   const [roomToFinalize, setRoomToFinalize] = useState<Escalation | null>(null);
+  const [finalizeExitTime, setFinalizeExitTime] = useState('');
 
   // Pop-up doctor addition states
   const [showAddDoctorForm, setShowAddDoctorForm] = useState(false);
@@ -84,7 +89,7 @@ export default function AgoraTab({
   const [addErrorMsg, setAddErrorMsg] = useState('');
 
   // Force re-renders for live counters and clock
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [timeString, setTimeString] = useState(() => new Date().toLocaleTimeString('pt-BR'));
   
   useEffect(() => {
@@ -95,10 +100,47 @@ export default function AgoraTab({
     return () => clearInterval(timer);
   }, []);
 
+  // Dynamic doctor status computer based on active date presences & shift ranges
+  const doctorsForAgora = useMemo(() => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const currentHour = new Date().getHours();
+
+    // Filter presences for today
+    const todaysPresences = dailyPresences.filter(p => p.date === todayStr);
+
+    return doctors.map(doc => {
+      const presence = todaysPresences.find(p => p.doctorID === doc.id);
+      if (!presence) {
+        return { ...doc, presente: false };
+      }
+
+      const shift = presence.shiftType;
+      let isWithinShift = true;
+
+      // Restrict only if within standard shift bounds (07:00 to 19:00)
+      if (currentHour >= 7 && currentHour < 19) {
+        if (shift === '6h-manha') {
+          isWithinShift = currentHour >= 7 && currentHour < 13;
+        } else if (shift === '6h-tarde') {
+          isWithinShift = currentHour >= 13 && currentHour < 19;
+        } else {
+          isWithinShift = true; // 12h
+        }
+      } else {
+        isWithinShift = true; // Outside standard, make available for testing/off-hours
+      }
+
+      return {
+        ...doc,
+        presente: isWithinShift
+      };
+    });
+  }, [doctors, dailyPresences, tick]);
+
   // Compute stats
   const { present, available, escalated } = useMemo(() => {
-    return getDoctorsStatuses(doctors, escalations);
-  }, [doctors, escalations]);
+    return getDoctorsStatuses(doctorsForAgora, escalations);
+  }, [doctorsForAgora, escalations]);
 
   // Sync Room selection changes to default credit hours
   const activeRoom = useMemo(() => {
@@ -114,6 +156,17 @@ export default function AgoraTab({
       }
     }
   }, [activeRoom]);
+
+  useEffect(() => {
+    if (roomToFinalize) {
+      const now = new Date();
+      const HH = String(now.getHours()).padStart(2, '0');
+      const MM = String(now.getMinutes()).padStart(2, '0');
+      setFinalizeExitTime(`${HH}:${MM}`);
+    } else {
+      setFinalizeExitTime('');
+    }
+  }, [roomToFinalize]);
 
   // Clean form when modal closes/opens
   const openNewEscalation = (docId: string, roomId?: string) => {
@@ -179,6 +232,11 @@ export default function AgoraTab({
       return;
     }
 
+    if (ticketNum.trim() !== '' && !/^\d{8}$/.test(ticketNum.trim())) {
+      setOverlapError('O número de atendimento deve conter exatamente 8 dígitos numéricos.');
+      return;
+    }
+
     // Create escalation object
     const newEsc: Escalation = {
       id: `esc-${Date.now()}`,
@@ -192,7 +250,7 @@ export default function AgoraTab({
       entrada: entDate.toISOString(),
       saida: parsedSaidaISO,
       horasManual: customHours ? parseFloat(customHours) : undefined,
-      atosRealizados: numAtos,
+      atosRealizados: parsedSaidaISO ? 1 : 0, // automatic: 1 if entered exit time immediately, else 0 when still active
       ativa: !parsedSaidaISO // active if no end time
     };
 
@@ -213,8 +271,21 @@ export default function AgoraTab({
   };
 
   // Finalize (Check out) scale manually
-  const handleFinalizeEscalation = (escId: string) => {
-    const now = new Date();
+  const handleFinalizeEscalation = (escId: string, customExitTime?: string) => {
+    let now = new Date();
+
+    if (customExitTime) {
+      const [exH, exM] = customExitTime.split(':').map(Number);
+      const targetEsc = escalations.find(e => e.id === escId);
+      if (targetEsc) {
+        const baseDate = targetEsc.data ? new Date(targetEsc.data + 'T00:00:00') : new Date();
+        baseDate.setHours(exH, exM, 0, 0);
+        now = baseDate;
+      } else {
+        now.setHours(exH, exM, 0, 0);
+      }
+    }
+
     const updated = escalations.map(e => {
       if (e.id === escId) {
         // Calculate default hours if no manual credit
@@ -222,7 +293,7 @@ export default function AgoraTab({
         if (!cred) {
           const entry = new Date(e.entrada);
           const diffMs = now.getTime() - entry.getTime();
-          const hoursFraction = Math.max(0.1, parseFloat((diffMs / (3600000)).toFixed(1)));
+          const hoursFraction = Math.max(0.1, parseFloat((diffMs / 3600000).toFixed(1)));
           cred = hoursFraction;
         }
 
@@ -230,6 +301,7 @@ export default function AgoraTab({
           ...e,
           saida: now.toISOString(),
           horasManual: e.horasManual || cred, // preserve if manual else calculate
+          atosRealizados: 1, // automatic acts counter set to 1 when procedure is completed/finalized!
           ativa: false
         };
       }
@@ -283,6 +355,7 @@ export default function AgoraTab({
             ...e,
             saida: now.toISOString(),
             horasManual: e.horasManual || cred,
+            atosRealizados: 1, // automatic acts counter set to 1 when procedure is completed/finalized!
             ativa: false
           };
         }
@@ -293,6 +366,11 @@ export default function AgoraTab({
     }
 
     // 2. Set doctor as not present
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const updatedPresences = dailyPresences.filter(p => !(p.doctorID === doctorId && p.date === todayStr));
+    setDailyPresences(updatedPresences);
+    localStorage.setItem('unita_daily_presences', JSON.stringify(updatedPresences));
+
     const doc = doctors.find(d => d.id === doctorId);
     const updatedDocs = doctors.map(d => {
       if (d.id === doctorId) {
@@ -325,6 +403,17 @@ export default function AgoraTab({
       setAddErrorMsg('Selecione um médico do cadastro.');
       return;
     }
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const newPres: DailyPresence = {
+      id: `pres-${selectedExistingId}-${todayStr}-${Date.now()}`,
+      date: todayStr,
+      doctorID: selectedExistingId,
+      shiftType: '12h'
+    };
+    const updatedPresences = [...dailyPresences, newPres];
+    setDailyPresences(updatedPresences);
+    localStorage.setItem('unita_daily_presences', JSON.stringify(updatedPresences));
+
     const updatedDocs = doctors.map(d => {
       if (d.id === selectedExistingId) {
         return {
@@ -378,6 +467,17 @@ export default function AgoraTab({
       disponivelDesde: new Date().toISOString()
     };
 
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const newPres: DailyPresence = {
+      id: `pres-${uniqueId}-${todayStr}-${Date.now()}`,
+      date: todayStr,
+      doctorID: uniqueId,
+      shiftType: '12h'
+    };
+    const updatedPresences = [...dailyPresences, newPres];
+    setDailyPresences(updatedPresences);
+    localStorage.setItem('unita_daily_presences', JSON.stringify(updatedPresences));
+
     const updatedDoctors = [...doctors, newDoc];
     setDoctors(updatedDoctors);
     localStorage.setItem('unita_doctors', JSON.stringify(updatedDoctors));
@@ -409,6 +509,11 @@ export default function AgoraTab({
 
     if (!editJustification.trim()) {
       alert('Por favor, informe a justificativa obrigatória para edição.');
+      return;
+    }
+
+    if (editingEscalation.atendimento.trim() !== '' && !/^\d{8}$/.test(editingEscalation.atendimento.trim())) {
+      alert('O número de atendimento deve ser composto por exatamente 8 dígitos numéricos.');
       return;
     }
 
@@ -511,29 +616,132 @@ export default function AgoraTab({
     return HOSPITAL_ROOMS.filter(r => !activeRoomIds.includes(r.id)).length;
   }, [escalations]);
 
+  // Calculate daytime shift progress (from 07:00 to 19:00 - 12 hours)
+  const shiftProgress = useMemo(() => {
+    const now = new Date();
+    const hour = now.getHours();
+    const min = now.getMinutes();
+    const currentMins = hour * 60 + min;
+    const startMins = 7 * 60; // 07:00
+    const endMins = 19 * 60; // 19:00
+
+    if (currentMins < startMins) return 0;
+    if (currentMins > endMins) return 100;
+    return Math.round(((currentMins - startMins) / (endMins - startMins)) * 100);
+  }, [tick]);
+
+  // Reusable lightweight SVG Donut Chart with animated stroke and optional floating icon badge
+  const renderDonut = (
+    value: number,
+    max: number,
+    colorClass: string,
+    bgClass: string,
+    centerText: string,
+    icon?: React.ReactNode
+  ) => {
+    const safeMax = max || 1;
+    const percentage = Math.min(100, Math.max(0, (value / safeMax) * 100));
+    const radius = 20;
+    const strokeWidth = 4.5;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDashoffset = circumference - (percentage / 100) * circumference;
+
+    return (
+      <div className="relative w-15 h-15 flex items-center justify-center shrink-0">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 48 48">
+          {/* Background circle */}
+          <circle
+            cx="24"
+            cy="24"
+            r={radius}
+            className={`${bgClass} fill-transparent`}
+            strokeWidth={strokeWidth}
+          />
+          {/* Progress circle */}
+          <circle
+            cx="24"
+            cy="24"
+            r={radius}
+            className={`${colorClass} fill-transparent transition-all duration-700 ease-out`}
+            strokeWidth={strokeWidth}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+          <span className="text-xs font-black text-slate-800 font-mono tracking-tighter">
+            {centerText}
+          </span>
+          {icon && (
+            <div className="absolute -top-1 -right-1 w-4.5 h-4.5 rounded-full shadow-2xs flex items-center justify-center border scale-90 bg-white border-slate-100">
+              {icon}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const presentPercentageStr = `${Math.round((present.length / 22) * 100)}%`;
+  const availablePercentageStr = `${present.length ? Math.round((available.length / present.length) * 100) : 0}%`;
+  const escalatedPercentageStr = `${present.length ? Math.round((escalated.length / present.length) * 100) : 0}%`;
+
   return (
     <div className="space-y-8 pb-16">
       
-      {/* 1. SMALL CLICKABLE RESUME CARDS */}
+      {/* 1. SMALL CLICKABLE RESUME CARDS WITH BEAUTIFUL CIRCULAR CHARTS */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="resume-cards-section">
+        {/* Realtime Hour Hand (Typographic Widget with analog micro elements - No graph) */}
+        <div className="bg-slate-950 rounded-xl p-4 flex items-center gap-4 border border-slate-800 shadow-md text-white">
+          <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 text-blue-400 shadow-inner">
+            <Clock className="h-6 w-6 animate-pulse" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+              </span>
+              <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">Horário Tempo Real</p>
+            </div>
+            <h3 className="text-2xl font-mono font-black text-white leading-none mt-2 tracking-wider">
+              {timeString}
+            </h3>
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-[9px] text-slate-500 font-mono font-bold uppercase tracking-wider">
+                Plantão Diurno
+              </span>
+              <span className="text-slate-705 text-xs">•</span>
+              <span className="text-[9px] text-slate-500 font-mono font-bold">
+                07h às 19h
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* Presente / No Plantão Card */}
         <div
           id="card-present"
           onClick={() => setActiveCardModal('present')}
-          className="bg-white rounded-xl shadow-xs border border-slate-200 p-4 flex items-center gap-4 cursor-pointer hover:bg-blue-50 hover:shadow-xs transition-colors group"
+          className="bg-white rounded-xl shadow-xs border border-slate-200 p-4 flex items-center gap-4 cursor-pointer hover:bg-blue-50/50 hover:border-blue-200 hover:shadow-sm transition-all group"
         >
-          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 transition-transform group-hover:scale-105 shrink-0">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">No Plantão</p>
-            <div className="flex items-baseline gap-1.5 mt-0.5">
-              <span className="text-2xl font-black text-slate-800 font-display">{present.length}</span>
-              <span className="text-xs text-slate-400 font-semibold font-sans">médicos</span>
-            </div>
-            <div className="mt-1 text-[10px] text-emerald-600 font-mono font-bold flex items-center gap-0.5 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 w-fit">
-              {totalVagasLivres} vagas livres
-            </div>
+          {renderDonut(
+            present.length,
+            22,
+            'stroke-blue-600',
+            'stroke-blue-100',
+            presentPercentageStr,
+            <Users className="h-2.5 w-2.5 text-blue-500" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">No Plantão</p>
+            <h3 className="text-xl font-black text-slate-800 leading-tight mt-1 font-display">
+              {present.length} <span className="text-xs font-bold text-slate-400 font-sans">/ 22</span>
+            </h3>
+            <p className="text-[9px] text-slate-500 font-semibold font-sans mt-0.5 truncate bg-blue-50/50 rounded px-1.5 py-0.5 border border-blue-100/30 w-fit">
+              vagas preenchidas
+            </p>
           </div>
         </div>
 
@@ -541,25 +749,29 @@ export default function AgoraTab({
         <div
           id="card-available"
           onClick={() => setActiveCardModal('available')}
-          className="bg-white rounded-xl shadow-xs border border-slate-200 p-4 flex items-center gap-4 cursor-pointer hover:bg-green-50 hover:shadow-xs transition-colors group relative"
+          className="bg-white rounded-xl shadow-xs border border-slate-200 p-4 flex items-center gap-4 cursor-pointer hover:bg-emerald-50/50 hover:border-emerald-200 hover:shadow-sm transition-all group relative"
         >
-          <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-green-600 transition-transform group-hover:scale-105 shrink-0">
-            <CheckCircle className="h-5 w-5" />
-          </div>
-          <div className="w-full">
-            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Disponíveis</p>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-2xl font-black text-slate-800 font-display">{available.length}</span>
-              <span className="text-[10px] text-slate-400 font-semibold font-sans">aptos</span>
-            </div>
+          {renderDonut(
+            available.length,
+            present.length || 1,
+            'stroke-emerald-600',
+            'stroke-emerald-100',
+            availablePercentageStr,
+            <CheckCircle className="h-2.5 w-2.5 text-emerald-600" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">Disponíveis</p>
+            <h3 className="text-xl font-black text-slate-800 leading-tight mt-1 font-display">
+              {available.length} <span className="text-xs font-bold text-slate-400 font-sans">/ {present.length}</span>
+            </h3>
             {available.some(a => a.isIdle) ? (
-              <div className="mt-1 text-[10px] text-amber-600 font-mono font-bold flex items-center gap-0.5 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-100 w-fit">
-                <AlertTriangle className="h-2.5 w-2.5" /> {available.filter(a => a.isIdle).length} ociosos
+              <div className="mt-1 text-[9px] text-amber-700 font-sans font-bold flex items-center gap-0.5 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 w-fit leading-none">
+                <AlertTriangle className="h-2 w-2" /> {available.filter(a => a.isIdle).length} ociosos
               </div>
             ) : (
-              <div className="mt-1 text-[10px] text-green-600 font-bold flex items-center gap-1">
-                Ver status &rarr;
-              </div>
+              <p className="text-[9px] text-emerald-700 font-semibold font-sans mt-0.5 truncate bg-emerald-50/50 rounded px-1.5 py-0.5 border border-emerald-100/30 w-fit">
+                prontos para sala
+              </p>
             )}
           </div>
         </div>
@@ -568,29 +780,25 @@ export default function AgoraTab({
         <div
           id="card-escalated"
           onClick={() => setActiveCardModal('escalated')}
-          className="bg-white rounded-xl shadow-xs border border-slate-200 p-4 flex items-center gap-4 cursor-pointer hover:bg-orange-50 hover:shadow-xs transition-colors group"
+          className="bg-white rounded-xl shadow-xs border border-slate-200 p-4 flex items-center gap-4 cursor-pointer hover:bg-amber-50/50 hover:border-amber-200 hover:shadow-sm transition-all group"
         >
-          <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600 transition-transform group-hover:scale-105 shrink-0">
-            <Clock className="h-5 w-5" />
+          {renderDonut(
+            escalated.length,
+            present.length || 1,
+            'stroke-amber-500',
+            'stroke-amber-100',
+            escalatedPercentageStr,
+            <Clock className="h-2.5 w-2.5 text-amber-600" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">Escalados</p>
+            <h3 className="text-xl font-black text-slate-800 leading-tight mt-1 font-display">
+              {escalated.length} <span className="text-xs font-bold text-slate-400 font-sans">/ {present.length}</span>
+            </h3>
+            <p className="text-[9px] text-amber-700 font-semibold font-sans mt-0.5 truncate bg-amber-50/50 rounded px-1.5 py-0.5 border border-amber-100/30 w-fit">
+              ativos em cirurgia
+            </p>
           </div>
-          <div>
-            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Escalados</p>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-2xl font-black text-slate-800 font-display">{escalated.length}</span>
-              <span className="text-[10px] text-slate-400 font-semibold font-sans">em sala</span>
-            </div>
-            <div className="mt-1 text-[10px] text-orange-600 font-bold flex items-center gap-1">
-              Ver setores &rarr;
-            </div>
-          </div>
-        </div>
-
-        {/* Realtime Hour Hand (Clock Card) */}
-        <div className="bg-slate-800 rounded-xl p-4 flex flex-col justify-center text-white shadow-sm border border-slate-700">
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider leading-none">Horário Atual</p>
-          <p className="text-2xl font-mono font-black mt-1.5 text-slate-100 tracking-wider">
-            {timeString}
-          </p>
         </div>
       </section>
 
@@ -620,15 +828,6 @@ export default function AgoraTab({
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
-
-            {session.perfil === 'administrador' && (
-              <button
-                onClick={() => openNewEscalation('')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold cursor-pointer transition-all shadow-sm uppercase tracking-wider"
-              >
-                <Plus className="h-3.5 w-3.5" /> Nova Escalação
-              </button>
-            )}
           </div>
         </div>
 
@@ -810,7 +1009,9 @@ export default function AgoraTab({
             <div className="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
               <div>
                 <h3 className="text-sm font-bold font-display">Escalar Anestesiologista</h3>
-                <p className="text-[11px] text-slate-400">Inserir parâmetros do ato anestésico</p>
+                <p className="text-[11px] text-slate-400">
+                  {activeRoom ? `Destino: ${activeRoom.setor} - ${activeRoom.sala}` : 'Inserir parâmetros do ato anestésico'}
+                </p>
               </div>
               <button
                 onClick={() => setIsEscalateModalOpen(false)}
@@ -867,36 +1068,22 @@ export default function AgoraTab({
                 </select>
               </div>
 
-              {/* Sectores & Sala Select */}
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-slate-700 uppercase">Local do Procedimento</label>
-                <select
-                  id="form-select-room"
-                  required
-                  value={selectedRoomId}
-                  onChange={(e) => setSelectedRoomId(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 text-slate-800 bg-slate-50"
-                >
-                  {HOSPITAL_ROOMS.map(room => (
-                    <option key={room.id} value={room.id}>
-                      {room.setor} - {room.sala} {room.especial ? '⭐ (Especial 6h)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               {/* Patient code (Atendimento) */}
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 uppercase">
-                  Nº Atendimento <span className="text-slate-400 text-[10px] font-normal">(Opcional)</span>
+                  Nº Atendimento <span className="text-slate-400 text-[10px] font-normal">(8 dígitos, Opcional)</span>
                 </label>
                 <input
                   id="form-input-ticket"
                   type="text"
-                  placeholder="Ex: AT-129038"
+                  placeholder="Ex: 12345678"
+                  maxLength={8}
                   value={ticketNum}
-                  onChange={(e) => setTicketNum(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 text-slate-800 bg-slate-50"
+                  onChange={(e) => {
+                    const onlyNums = e.target.value.replace(/\D/g, '');
+                    setTicketNum(onlyNums);
+                  }}
+                  className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 text-slate-800 bg-slate-50 font-mono"
                 />
               </div>
 
@@ -910,7 +1097,7 @@ export default function AgoraTab({
                     required
                     value={entryTime}
                     onChange={(e) => setEntryTime(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 text-slate-800 bg-slate-50"
+                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 text-slate-800 bg-slate-50 animate-fade-in"
                   />
                 </div>
                 <div className="space-y-1">
@@ -928,39 +1115,6 @@ export default function AgoraTab({
                 </div>
               </div>
 
-              {/* Special Sector rules indicator & manual hours display */}
-              <div className="p-3 bg-blue-50/60 rounded-lg border border-blue-100 flex flex-col gap-1.5">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-semibold text-slate-700">Horas Creditadas</label>
-                  <input
-                    id="form-input-custom-hours"
-                    type="number"
-                    step="0.5"
-                    className="w-20 text-xs px-2 py-1 border border-slate-200 rounded bg-white text-slate-800 font-mono text-right"
-                    placeholder="Automático"
-                    value={customHours}
-                    onChange={(e) => setCustomHours(e.target.value)}
-                  />
-                </div>
-                <p className="text-[10px] text-slate-500 leading-normal">
-                  {activeRoom?.especial 
-                    ? '⭐ Setor Especial contabilizado inicialmente como bloco de 6 horas.' 
-                    : 'Calculada de forma dinâmica a partir da permanência de entrada e saída se deixado em branco.'}
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-slate-700 uppercase">Atos Anestésicos Realizados</label>
-                <input
-                  id="form-input-atos"
-                  type="number"
-                  min="1"
-                  className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 text-slate-800 bg-slate-50 font-mono"
-                  value={numAtos}
-                  onChange={(e) => setNumAtos(parseInt(e.target.value) || 1)}
-                />
-              </div>
-
               <div className="pt-2 flex justify-end gap-2 text-xs">
                 <button
                   type="button"
@@ -975,7 +1129,7 @@ export default function AgoraTab({
                   id="form-submit-btn"
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all cursor-pointer"
                 >
-                  Confirmar Escala
+                  Escalar
                 </button>
               </div>
             </form>
@@ -1002,37 +1156,30 @@ export default function AgoraTab({
 
             <form onSubmit={handleUpdateEscalation} className="p-6 space-y-4">
               <div className="space-y-1">
-                <label className="block text-xs font-semibold text-slate-700 uppercase">Nº Atendimento</label>
+                <label className="block text-xs font-semibold text-slate-700 uppercase">Nº Atendimento (8 dígitos)</label>
                 <input
                   type="text"
+                  placeholder="Ex: 12345678"
+                  maxLength={8}
                   className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-800 font-mono"
                   value={editingEscalation.atendimento}
-                  onChange={(e) => setEditingEscalation({ ...editingEscalation, atendimento: e.target.value })}
+                  onChange={(e) => {
+                    const onlyNums = e.target.value.replace(/\D/g, '');
+                    setEditingEscalation({ ...editingEscalation, atendimento: onlyNums });
+                  }}
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-slate-700 uppercase">Horas Creditadas</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-800 font-mono"
-                    value={editRequestHours}
-                    onChange={(e) => setEditRequestHours(e.target.value)}
-                    placeholder="Carga horária"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-slate-700 uppercase">Atos anestésicos</label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-800 font-mono"
-                    value={editingEscalation.atosRealizados}
-                    onChange={(e) => setEditingEscalation({ ...editingEscalation, atosRealizados: parseInt(e.target.value) || 1 })}
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-slate-700 uppercase">Horas Creditadas</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-800 font-mono"
+                  value={editRequestHours}
+                  onChange={(e) => setEditRequestHours(e.target.value)}
+                  placeholder="Carga horária"
+                />
               </div>
 
               {/* Justification - MUST MANDATORY REQUIRED */}
@@ -1186,8 +1333,21 @@ export default function AgoraTab({
                 </div>
               </div>
 
+              <div className="space-y-1.5 bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs">
+                <label className="block font-bold text-slate-700 uppercase tracking-wide">
+                  Horário de Saída (Fim):
+                </label>
+                <input
+                  type="time"
+                  required
+                  value={finalizeExitTime}
+                  onChange={(e) => setFinalizeExitTime(e.target.value)}
+                  className="w-full text-xs px-3 py-2 border border-slate-250 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 text-slate-800 bg-white font-mono"
+                />
+              </div>
+
               <p className="text-xs text-slate-600 leading-relaxed">
-                Ao clicar em confirmar, a ocupação desta sala será finalizada com o horário atual, e o anestesista retornará automaticamente para o topo da lista de <strong>médicos disponíveis</strong> por estar com o horário de liberação recente.
+                Ao clicar em confirmar, a ocupação desta sala será finalizada com o horário de saída selecionado acima, e o anestesista retornará automaticamente para a lista de <strong>médicos disponíveis</strong>.
               </p>
 
               <div className="pt-2 flex justify-end gap-2 text-xs">
@@ -1201,7 +1361,7 @@ export default function AgoraTab({
                 <button
                   type="button"
                   onClick={() => {
-                    handleFinalizeEscalation(roomToFinalize.id);
+                    handleFinalizeEscalation(roomToFinalize.id, finalizeExitTime);
                     setRoomToFinalize(null);
                   }}
                   className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all cursor-pointer shadow-sm flex items-center gap-1"
@@ -1241,151 +1401,10 @@ export default function AgoraTab({
               {activeCardModal === 'present' && (
                 <div className="space-y-4 pt-1">
                   
-                  {/* Toggle header and button to Add Doctor */}
+                  {/* Toggle header inside modal */}
                   <div className="flex justify-between items-center pb-2 mb-2 border-b border-sidebar-divider">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Médicos Presentes ({present.length})</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddDoctorForm(!showAddDoctorForm);
-                        setAddErrorMsg('');
-                      }}
-                      className="px-2.5 py-1 bg-blue-600 text-white rounded text-[10px] font-bold hover:bg-blue-700 transition-colors uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-2xs"
-                    >
-                      <Plus className="h-3 w-3" /> Adicionar Médico
-                    </button>
                   </div>
-
-                  {/* Add Doctor form area */}
-                  {showAddDoctorForm && (
-                    <div className="bg-slate-50 rounded-lg p-3.5 border border-slate-200 text-xs text-slate-700 space-y-3 shadow-xs">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">Adicionar Médico ao Plantão</span>
-                        <button
-                          type="button"
-                          onClick={() => setShowAddDoctorForm(false)}
-                          className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-
-                      {/* Add Method Tab */}
-                      <div className="flex rounded-md bg-slate-200/80 p-0.5">
-                        <button
-                          type="button"
-                          onClick={() => { setAddMethod('select'); setAddErrorMsg(''); }}
-                          className={`flex-1 py-1 text-center rounded text-[10px] font-black uppercase transition-all cursor-pointer ${
-                            addMethod === 'select' ? 'bg-white text-slate-900 shadow-3xs' : 'text-slate-500 hover:text-slate-700'
-                          }`}
-                        >
-                          Médico Registrado
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setAddMethod('new'); setAddErrorMsg(''); }}
-                          className={`flex-1 py-1 text-center rounded text-[10px] font-black uppercase transition-all cursor-pointer ${
-                            addMethod === 'new' ? 'bg-white text-slate-900 shadow-3xs' : 'text-slate-500 hover:text-slate-700'
-                          }`}
-                        >
-                          Novo Cadastro + Plantão
-                        </button>
-                      </div>
-
-                      {addErrorMsg && (
-                        <div className="text-[10px] text-rose-600 font-bold bg-rose-50 border border-rose-100 rounded px-2 py-1">
-                          {addErrorMsg}
-                        </div>
-                      )}
-
-                      {addMethod === 'select' ? (
-                        <form onSubmit={handleAddExistingDoctor} className="space-y-2">
-                          <div>
-                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Escolher Médico Registrado:</label>
-                            {doctors.filter(d => !d.presente).length === 0 ? (
-                              <p className="text-[11px] text-slate-500 italic py-1 bg-white border border-slate-200 rounded px-2">
-                                Todos anestesistas cadastrados já estão no plantão.
-                              </p>
-                            ) : (
-                              <select
-                                value={selectedExistingId}
-                                onChange={(e) => setSelectedExistingId(e.target.value)}
-                                className="w-full text-xs px-2.5 py-1.5 border border-slate-250 rounded-lg focus:ring-1 focus:ring-blue-600 text-slate-800 bg-white"
-                              >
-                                <option value="">Selecione...</option>
-                                {doctors.filter(d => !d.presente).map(d => (
-                                  <option key={d.id} value={d.id}>
-                                    {d.nome} (CRM {d.crm})
-                                  </option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                          {doctors.filter(d => !d.presente).length > 0 && (
-                            <button
-                              type="submit"
-                              className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors text-[10px] uppercase tracking-widest cursor-pointer shadow-3xs"
-                            >
-                              Confirmar Entrada
-                            </button>
-                          )}
-                        </form>
-                      ) : (
-                        <form onSubmit={handleAddNewDoctor} className="space-y-2.5">
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="block text-[9px] font-bold uppercase text-slate-500 mb-0.5">Nome:</label>
-                              <input
-                                type="text"
-                                placeholder="Dr(a). Nome..."
-                                value={newDocNome}
-                                onChange={(e) => setNewDocNome(e.target.value)}
-                                className="w-full text-xs px-2 py-1 border border-slate-250 bg-white rounded focus:ring-1 focus:ring-blue-600"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[9px] font-bold uppercase text-slate-500 mb-0.5">CRM:</label>
-                              <input
-                                type="text"
-                                placeholder="123456-SP"
-                                value={newDocCrm}
-                                onChange={(e) => setNewDocCrm(e.target.value)}
-                                className="w-full text-xs px-2 py-1 border border-slate-250 bg-white rounded focus:ring-1 focus:ring-blue-600"
-                              />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="block text-[9px] font-bold uppercase text-slate-500 mb-0.5">Celular:</label>
-                              <input
-                                type="text"
-                                placeholder="(11) 99999-9999"
-                                value={newDocCelular}
-                                onChange={(e) => setNewDocCelular(e.target.value)}
-                                className="w-full text-xs px-2 py-1 border border-slate-250 bg-white rounded focus:ring-1 focus:ring-blue-600"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[9px] font-bold uppercase text-slate-500 mb-0.5">Afinidade (Opcional):</label>
-                              <input
-                                type="text"
-                                placeholder="Neuro, Ginecologia..."
-                                value={newDocAfinidade}
-                                onChange={(e) => setNewDocAfinidade(e.target.value)}
-                                className="w-full text-xs px-2 py-1 border border-slate-250 bg-white rounded focus:ring-1 focus:ring-blue-600"
-                              />
-                            </div>
-                          </div>
-                          <button
-                            type="submit"
-                            className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold transition-colors text-[10px] uppercase tracking-widest cursor-pointer shadow-3xs"
-                          >
-                            Registrar & Adicionar
-                          </button>
-                        </form>
-                      )}
-                    </div>
-                  )}
 
                   {/* List of present doctors */}
                   {present.length === 0 ? (
@@ -1397,30 +1416,15 @@ export default function AgoraTab({
                         return (
                           <div key={doc.id} className="py-2.5 flex justify-between items-center transition-colors">
                             <div>
-                              <div className="text-xs font-bold text-slate-800">{doc.nome}</div>
+                               <div className="text-xs font-bold text-slate-800">{doc.nome}</div>
                               <div className="text-[10px] text-slate-500 font-mono">{doc.crm} • {doc.celular}</div>
                             </div>
                             <div className="flex items-center gap-2">
                               <span className={`text-[9px] font-mono px-2 py-0.5 rounded font-extrabold uppercase ${
-                                activeEsc ? 'bg-blue-100 text-blue-900 border border-blue-200' : 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                                activeEsc ? 'bg-blue-100 text-blue-900 border border-blue-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                               }`}>
                                 {activeEsc ? 'Escalado' : 'Disponível'}
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const textWarn = activeEsc 
-                                    ? `\n\nATENÇÃO: Este médico possui uma escalação ATIVA na sala ${activeEsc.salaNome}. Retirá-lo do plantão irá automaticamente desocupar esta sala e encerrar o seu tempo de permanência.` 
-                                    : '';
-                                  if (confirm(`Excluir Dr(a). ${doc.nome} da lista dos plantonistas do dia?${textWarn}`)) {
-                                    handleRemoveDoctorFromShift(doc.id);
-                                  }
-                                }}
-                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 rounded transition-all cursor-pointer"
-                                title="Excluir o nome da lista dos plantonistas do dia"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
                             </div>
                           </div>
                         );

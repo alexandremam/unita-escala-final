@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserSession } from '../types';
-import { Shield, Key, Mail, ArrowLeft, Activity } from 'lucide-react';
+import { Shield, Key, Mail, ArrowLeft } from 'lucide-react';
+import UnitaLogo from './UnitaLogo';
 
 interface LoginProps {
   onLoginSuccess: (session: UserSession) => void;
@@ -60,15 +61,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
-        <div className="flex justify-center items-center gap-3">
-          <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-lg shadow-blue-500/20">
-            <Activity className="h-7 w-7" />
-          </div>
-          <div>
-            <h2 className="text-3xl font-bold text-white font-display tracking-tight leading-none">Unitá</h2>
-            <p className="text-xs text-blue-400 font-mono tracking-widest mt-1 uppercase">Anestesia - Escala</p>
-          </div>
-        </div>
+        <UnitaLogo variant="full" size={44} lightText={true} className="drop-shadow-md select-none pointer-events-none" />
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10 px-4 sm:px-0">
