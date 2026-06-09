@@ -66,6 +66,6 @@ export interface DailyPresence {
   id: string;
   date: string; // YYYY-MM-DD
   doctorID: string;
-  shiftType: '12h' | '6h-manha' | '6h-tarde';
+  shiftType: string;
 }
 

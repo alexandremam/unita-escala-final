@@ -61,7 +61,17 @@ export const INITIAL_DOCTORS: Doctor[] = [
   { id: 'd17', nome: 'Dra. Laura Mendes', crm: 'CRM 77889-SP', celular: '(11) 91234-5679', afinidade: 'Anestesia Geral / Endoscopia', presente: true, disponivelDesde: '' },
   { id: 'd18', nome: 'Dr. Henrique Castro', crm: 'CRM 88990-SP', celular: '(11) 91234-5680', afinidade: 'Ortopedia de Alta Complexidade', presente: true, disponivelDesde: '' },
   { id: 'd19', nome: 'Dra. Natália Freitas', crm: 'CRM 99001-SP', celular: '(11) 91234-5681', afinidade: 'Geriatria', presente: true, disponivelDesde: '' },
-  { id: 'd20', nome: 'Dr. Paulo Teixeira', crm: 'CRM 10101-SP', celular: '(11) 91234-5682', afinidade: 'Cirurgia Robótica / Geral', presente: true, disponivelDesde: '' }
+  { id: 'd20', nome: 'Dr. Paulo Teixeira', crm: 'CRM 10101-SP', celular: '(11) 91234-5682', afinidade: 'Cirurgia Robótica / Geral', presente: true, disponivelDesde: '' },
+  { id: 'd21', nome: 'Dr. Roberto Silveira', crm: 'CRM 12131-SP', celular: '(11) 92345-6710', afinidade: 'Geriatria e Trauma', presente: true, disponivelDesde: '' },
+  { id: 'd22', nome: 'Dra. Cláudia Pinheiro', crm: 'CRM 13141-SP', celular: '(11) 92345-6711', afinidade: 'Obstetrícia Avançada', presente: true, disponivelDesde: '' },
+  { id: 'd23', nome: 'Dr. Fernando Guedes', crm: 'CRM 14151-SP', celular: '(11) 92345-6712', afinidade: 'Anestesia Geral / Obesidade', presente: true, disponivelDesde: '' },
+  { id: 'd24', nome: 'Dra. Vanessa Meireles', crm: 'CRM 15161-SP', celular: '(11) 92345-6713', afinidade: 'Dor Crônica / Bloqueios', presente: true, disponivelDesde: '' },
+  { id: 'd25', nome: 'Dr. Ricardo Sampaio', crm: 'CRM 16171-SP', celular: '(11) 92345-6714', afinidade: 'Pacientes de Alto Risco / Geral', presente: true, disponivelDesde: '' },
+  { id: 'd26', nome: 'Dra. Isabela Fontes', crm: 'CRM 17181-SP', celular: '(11) 92345-6715', afinidade: 'Oftalmologia e Sedação', presente: true, disponivelDesde: '' },
+  { id: 'd27', nome: 'Dr. Alan Kardec', crm: 'CRM 18191-SP', celular: '(11) 92345-6716', afinidade: 'Neuroanestesiologia', presente: true, disponivelDesde: '' },
+  { id: 'd28', nome: 'Dra. Carolina Vargas', crm: 'CRM 19201-SP', celular: '(11) 92345-6717', afinidade: 'Cirurgia de Grande Porte', presente: true, disponivelDesde: '' },
+  { id: 'd29', nome: 'Dr. Otávio Mesquita', crm: 'CRM 20211-SP', celular: '(11) 92345-6718', afinidade: 'Anestesia Pediátrica e Neonatal', presente: true, disponivelDesde: '' },
+  { id: 'd30', nome: 'Dra. Tatiana Neves', crm: 'CRM 21221-SP', celular: '(11) 92345-6719', afinidade: 'Ultrassonografia e Bloqueio', presente: true, disponivelDesde: '' }
 ];
 
 export function initializeDatabase() {
@@ -75,7 +85,11 @@ export function initializeDatabase() {
       // d1: idle for 75 minutes
       // d5: idle for 120 minutes (who is active initially? let's see)
       // We will set different minute offsets
-      const offsetMinutes = [75, 40, 95, 30, 130, 25, 110, 15, 80, 45, 90, 5, 65, 50, 85, 35, 105, 20, 115, 10][idx];
+      const offsetMinutes = [
+        75, 40, 95, 30, 130, 25, 110, 15, 80, 45, 
+        90,  5, 65, 50, 85,  35, 105, 20, 115, 10,
+        125, 60, 45, 95, 150, 70, 80,  55, 35,  110
+      ][idx] || 30;
       const d = new Date(now.getTime() - offsetMinutes * 60 * 1000);
       return {
         ...doc,

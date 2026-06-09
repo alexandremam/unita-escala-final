@@ -1,5 +1,5 @@
 import { UserSession } from '../types';
-import { Menu, Clock, CalendarCheck, BarChart3, History, UserPlus, BarChart2, AlertCircle } from 'lucide-react';
+import { Menu, Clock, CalendarCheck, Calendar, BarChart3, History, UserPlus, BarChart2, AlertCircle } from 'lucide-react';
 import { useState } from 'react';
 import UnitaLogo from './UnitaLogo';
 
@@ -11,9 +11,19 @@ interface SidebarProps {
   session: UserSession;
   activeSubTab?: 'desempenho' | 'auditoria' | 'uti';
   setActiveSubTab?: (subTab: 'desempenho' | 'auditoria' | 'uti') => void;
+  plantaoSubTab?: 'calendario' | 'escalas';
+  setPlantaoSubTab?: (subTab: 'calendario' | 'escalas') => void;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, session, activeSubTab, setActiveSubTab }: SidebarProps) {
+export default function Sidebar({
+  activeTab,
+  setActiveTab,
+  session,
+  activeSubTab,
+  setActiveSubTab,
+  plantaoSubTab,
+  setPlantaoSubTab
+}: SidebarProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   const menuItems = [
@@ -21,6 +31,11 @@ export default function Sidebar({ activeTab, setActiveTab, session, activeSubTab
     { id: 'plantao' as TabType, label: 'Escala de Plantão', icon: CalendarCheck, adminOnly: false },
     { id: 'relatorios' as TabType, label: 'Relatórios', icon: BarChart3, adminOnly: false },
     { id: 'plantonistas' as TabType, label: 'Credenciamento', icon: UserPlus, adminOnly: true },
+  ];
+
+  const plantaoSubMenuItems = [
+    { id: 'calendario' as const, label: 'Calendário de Plantões', icon: Calendar },
+    { id: 'escalas' as const, label: 'Configuração de Escalas', icon: Clock },
   ];
 
   const subMenuItems = [
@@ -67,6 +82,9 @@ export default function Sidebar({ activeTab, setActiveTab, session, activeSubTab
                   if (item.id === 'relatorios' && setActiveSubTab) {
                     setActiveSubTab('desempenho');
                   }
+                  if (item.id === 'plantao' && setPlantaoSubTab) {
+                    setPlantaoSubTab('calendario');
+                  }
                 }}
                 className={`w-full flex items-center gap-4 px-3 py-3 rounded-lg text-sm font-semibold transition-all cursor-pointer relative overflow-hidden ${
                   isActive
@@ -86,6 +104,39 @@ export default function Sidebar({ activeTab, setActiveTab, session, activeSubTab
                   {item.label}
                 </span>
               </button>
+
+              {/* Render submenu for Escala de Plantão */}
+              {item.id === 'plantao' && isHovered && (
+                <div 
+                  className={`pl-6 pr-1 space-y-1 overflow-hidden transition-all duration-300 ${
+                    isActive ? 'max-h-40 opacity-100 mt-1 py-1' : 'max-h-0 opacity-0 pointer-events-none'
+                  }`}
+                >
+                  {plantaoSubMenuItems.map((subItem) => {
+                    const SubIcon = subItem.icon;
+                    const isSubActive = isActive && plantaoSubTab === subItem.id;
+                    return (
+                      <button
+                        key={subItem.id}
+                        onClick={() => {
+                          setActiveTab('plantao');
+                          if (setPlantaoSubTab) {
+                            setPlantaoSubTab(subItem.id);
+                          }
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[11px] font-bold tracking-wide uppercase transition-all cursor-pointer ${
+                          isSubActive
+                            ? 'bg-slate-800 text-blue-400 border border-slate-700/50'
+                            : 'hover:bg-slate-850 hover:text-slate-200 text-slate-500'
+                        }`}
+                      >
+                        <SubIcon className={`h-3.5 w-3.5 shrink-0 ${isSubActive ? 'text-blue-400' : 'text-slate-500'}`} />
+                        <span className="truncate">{subItem.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Render submenu for Relatórios only */}
               {item.id === 'relatorios' && isHovered && (

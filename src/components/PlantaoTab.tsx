@@ -8,6 +8,7 @@ import {
   Award,
   Calendar,
   UserPlus,
+  Users,
   Trash2,
   CheckCircle,
   HelpCircle,
@@ -28,7 +29,8 @@ import {
   ArrowRight,
   ArrowLeft,
   AlertTriangle,
-  Sparkles
+  Sparkles,
+  Repeat
 } from 'lucide-react';
 import { logSystemEvent } from '../utils';
 import UnitaLogo from './UnitaLogo';
@@ -40,6 +42,8 @@ interface PlantaoTabProps {
   setSession?: React.Dispatch<React.SetStateAction<UserSession | null>>;
   dailyPresences: DailyPresence[];
   setDailyPresences: React.Dispatch<React.SetStateAction<DailyPresence[]>>;
+  subTab?: 'calendario' | 'escalas';
+  setSubTab?: (subTab: 'calendario' | 'escalas') => void;
 }
 
 export default function PlantaoTab({
@@ -48,7 +52,9 @@ export default function PlantaoTab({
   session,
   setSession,
   dailyPresences,
-  setDailyPresences
+  setDailyPresences,
+  subTab: propSubTab,
+  setSubTab: propSetSubTab
 }: PlantaoTabProps) {
   // 1. Calculate Tomorrow's Date for Preselection as default
   const tomorrowStr = useMemo(() => {
@@ -66,7 +72,7 @@ export default function PlantaoTab({
 
   // 3. Temporary state structures representing pending scale edits under selectedDate
   const [tempSelectedDoctorIds, setTempSelectedDoctorIds] = useState<string[]>([]);
-  const [tempShiftTypes, setTempShiftTypes] = useState<Record<string, '12h' | '6h-manha' | '6h-tarde'>>({});
+  const [tempShiftTypes, setTempShiftTypes] = useState<Record<string, string>>({});
   const [tempCoordinatorIds, setTempCoordinatorIds] = useState<string[]>([]);
 
   // 4. Persistence Registry for Daily Coordinators
@@ -81,6 +87,21 @@ export default function PlantaoTab({
   // Calendar month/year navigation state
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
 
+  // Sub-categories and Hover state
+  const [localSubTab, localSetSubTab] = useState<'calendario' | 'escalas'>('calendario');
+  const subTab = propSubTab !== undefined ? propSubTab : localSubTab;
+  const setSubTab = propSetSubTab !== undefined ? propSetSubTab : localSetSubTab;
+
+  const [hoveredDate, setHoveredDate] = useState<string | null>(null);
+
+  // States to facilitate copy-paste and weekly schedule replication
+  const [showCopyFromDateDiv, setShowCopyFromDateDiv] = useState(false);
+  const [copySourceDate, setCopySourceDate] = useState('');
+  const [replicateWeekly, setReplicateWeekly] = useState(false);
+  const [replicateWeeksCount, setReplicateWeeksCount] = useState<number>(4);
+  const [replicateSpecificDates, setReplicateSpecificDates] = useState(false);
+  const [specificDestDates, setSpecificDestDates] = useState<string[]>([]);
+
   // Automatically load the saved state for selectedDate upon change
   useEffect(() => {
     // A. Detect existing presences for selectedDate
@@ -88,7 +109,7 @@ export default function PlantaoTab({
     setTempSelectedDoctorIds(preExisting.map(p => p.doctorID));
 
     // Map their respective shift configurations
-    const preShifts: Record<string, '12h' | '6h-manha' | '6h-tarde'> = {};
+    const preShifts: Record<string, string> = {};
     preExisting.forEach(p => {
       preShifts[p.doctorID] = p.shiftType;
     });
@@ -102,6 +123,12 @@ export default function PlantaoTab({
     setRosterError('');
     setSaveSuccess(false);
     setActiveStep(1);
+    
+    // Reset replication states for fresh configurations
+    setReplicateWeekly(false);
+    setReplicateSpecificDates(false);
+    setSpecificDestDates([]);
+    setShowCopyFromDateDiv(false);
   }, [selectedDate, dailyPresences, dateCoordinators]);
 
   // Compute filtered search list inside Doctor Picker
@@ -141,7 +168,7 @@ export default function PlantaoTab({
   };
 
   // Process shift change for general doctors
-  const handleChangeShiftType = (docId: string, type: '12h' | '6h-manha' | '6h-tarde') => {
+  const handleChangeShiftType = (docId: string, type: string) => {
     setTempShiftTypes(prev => ({
       ...prev,
       [docId]: type
@@ -184,16 +211,51 @@ export default function PlantaoTab({
 
     // Filter out previous records for this date and push updated batch
     const remainingPres = dailyPresences.filter(p => p.date !== selectedDate);
-    const finalizedPres = [...remainingPres, ...updatedPresRecords];
+    let finalizedPres = [...remainingPres, ...updatedPresRecords];
+
+    // 2. Save Daily assigned Coordinators
+    let updatedDateCoords = {
+      ...dateCoordinators,
+      [selectedDate]: tempCoordinatorIds
+    };
+
+    // 2.5 Apply replication logic
+    const datesToCopy: string[] = [];
+    if (replicateWeekly) {
+      for (let w = 1; w <= replicateWeeksCount; w++) {
+        const parts = selectedDate.split('-');
+        const targetDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        targetDate.setDate(targetDate.getDate() + w * 7);
+        const targetDateStr = targetDate.toLocaleDateString('en-CA');
+        datesToCopy.push(targetDateStr);
+      }
+    } else if (replicateSpecificDates && specificDestDates.length > 0) {
+      datesToCopy.push(...specificDestDates);
+    }
+
+    if (datesToCopy.length > 0) {
+      datesToCopy.forEach(destDate => {
+        // Strip previous presences for destDate
+        finalizedPres = finalizedPres.filter(p => p.date !== destDate);
+        
+        // Add duplicate presence records
+        tempSelectedDoctorIds.forEach(docId => {
+          finalizedPres.push({
+            id: `pres-${docId}-${destDate}`,
+            date: destDate,
+            doctorID: docId,
+            shiftType: tempShiftTypes[docId] || '12h'
+          });
+        });
+        
+        // Add duplicate coordinator record
+        updatedDateCoords[destDate] = tempCoordinatorIds;
+      });
+    }
 
     setDailyPresences(finalizedPres);
     localStorage.setItem('unita_daily_presences', JSON.stringify(finalizedPres));
 
-    // 2. Save Daily assigned Coordinators
-    const updatedDateCoords = {
-      ...dateCoordinators,
-      [selectedDate]: tempCoordinatorIds
-    };
     setDateCoordinators(updatedDateCoords);
     localStorage.setItem('unita_date_coordinators', JSON.stringify(updatedDateCoords));
 
@@ -221,11 +283,16 @@ export default function PlantaoTab({
       .map(d => d.nome)
       .join(' e ') || 'Nenhum';
 
+    let replicationLogSuffix = '';
+    if (datesToCopy.length > 0) {
+      replicationLogSuffix = ` Replicado escala para outras ${datesToCopy.length} semanas/datas futuras.`;
+    }
+
     logSystemEvent(
       session.usuario,
       session.perfil,
       'Entrada no plantão',
-      `Consolidou roteiro para ${selectedDate.split('-').reverse().join('/')}: ${doctorsCount} médicos escalados. Coordenador(es) designado(s): ${coordinatorsDetails}.`
+      `Consolidou roteiro para ${selectedDate.split('-').reverse().join('/')}: ${doctorsCount} médicos escalados. Coordenador(es) designado(s): ${coordinatorsDetails}.${replicationLogSuffix}`
     );
 
     // Timeout alert success styling
@@ -399,8 +466,10 @@ export default function PlantaoTab({
         </div>
       )}
 
-      {/* THREE STEP STEPPER INDICATOR */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-3xs">
+      {subTab === 'escalas' ? (
+        <div className="space-y-6 animate-fade-in" id="wizard-scale-workspace">
+          {/* THREE STEP STEPPER INDICATOR */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-3xs">
         <div className="grid grid-cols-3 gap-2">
           {/* Step 1 indicator */}
           <button
@@ -524,6 +593,77 @@ export default function PlantaoTab({
                 />
               </div>
 
+              {/* Copiar Escala de Outra Data */}
+              {session.perfil === 'administrador' && (
+                <div className="border border-blue-100 bg-blue-50/20 rounded-xl p-2.5 space-y-1.5" id="copy-roster-feature">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setShowCopyFromDateDiv(!showCopyFromDateDiv)}
+                      className="text-[10px] font-black uppercase text-blue-700 hover:text-blue-800 flex items-center gap-1 cursor-pointer bg-transparent border-none"
+                    >
+                      <Repeat className="h-3.5 w-3.5" /> Copiar escala de outro dia
+                    </button>
+                    {showCopyFromDateDiv && (
+                      <button
+                        type="button"
+                        onClick={() => setShowCopyFromDateDiv(false)}
+                        className="text-[10px] uppercase font-black text-slate-400 hover:text-slate-600 bg-transparent border-none"
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                  </div>
+
+                  {showCopyFromDateDiv && (
+                    <div className="space-y-1.5 pt-1 animate-fade-in">
+                      <label htmlFor="copy-source-date-input" className="block text-[9px] font-extrabold uppercase text-slate-500">Selecione o dia de origem para copiar:</label>
+                      <div className="flex gap-2">
+                        <input
+                          id="copy-source-date-input"
+                          type="date"
+                          value={copySourceDate}
+                          onChange={(e) => setCopySourceDate(e.target.value)}
+                          className="flex-1 text-[10.5px] px-2 py-1 border border-slate-200 rounded font-mono bg-white text-slate-800"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!copySourceDate) {
+                              alert('Selecione uma data para servir de modelo.');
+                              return;
+                            }
+                            // Process copy action
+                            const sourcePresences = dailyPresences.filter(p => p.date === copySourceDate);
+                            if (sourcePresences.length === 0) {
+                              alert('Nenhuma escala configurada encontrada para essa data de origem.');
+                              return;
+                            }
+                            const sourceDocIds = sourcePresences.map(p => p.doctorID);
+                            const sourceShifts: Record<string, string> = {};
+                            sourcePresences.forEach(p => {
+                              sourceShifts[p.doctorID] = p.shiftType;
+                            });
+
+                            const sourceCoords = dateCoordinators[copySourceDate] || [];
+
+                            setTempSelectedDoctorIds(sourceDocIds);
+                            setTempShiftTypes(sourceShifts);
+                            setTempCoordinatorIds(sourceCoords);
+
+                            alert(`Escala de ${copySourceDate.split('-').reverse().join('/')} carregada com sucesso! (${sourceDocIds.length} plantonistas e ${sourceCoords.length} coordenadores).`);
+                            setShowCopyFromDateDiv(false);
+                          }}
+                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-extrabold uppercase tracking-wide cursor-pointer flex items-center gap-1 shadow-2xs border-none"
+                        >
+                          Carregar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Fast Selector Scroll */}
               <div className="border border-slate-150 rounded-xl divide-y divide-slate-100 max-h-[350px] overflow-y-auto pr-1 bg-slate-50/40">
                 {filteredDoctors.length === 0 ? (
@@ -590,6 +730,38 @@ export default function PlantaoTab({
                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
                     {selectedDoctorsList.map(doc => {
                       const activeShiftType = tempShiftTypes[doc.id] || '12h';
+                      const shiftParts = activeShiftType.split(',');
+                      const hasExtendido = shiftParts.includes('extendido');
+                      const primaryVal = shiftParts.filter(p => p !== 'extendido')[0] || 'none';
+
+                      const handlePrimaryChange = (docId: string, newPrimary: string) => {
+                        let finalVal = '';
+                        if (newPrimary !== 'none') {
+                          finalVal = newPrimary;
+                        }
+                        if (hasExtendido) {
+                          finalVal = finalVal ? `${finalVal},extendido` : 'extendido';
+                        }
+                        if (!finalVal) {
+                          finalVal = '12h'; // fallback
+                        }
+                        handleChangeShiftType(docId, finalVal);
+                      };
+
+                      const handleToggleExtendidoLocal = (docId: string) => {
+                        let finalVal = '';
+                        if (primaryVal !== 'none') {
+                          finalVal = primaryVal;
+                        }
+                        if (!hasExtendido) {
+                          finalVal = finalVal ? `${finalVal},extendido` : 'extendido';
+                        }
+                        if (!finalVal) {
+                          finalVal = '12h'; // fallback
+                        }
+                        handleChangeShiftType(docId, finalVal);
+                      };
+
                       return (
                         <div
                           key={doc.id}
@@ -600,17 +772,39 @@ export default function PlantaoTab({
                             <p className="text-[9px] font-mono text-slate-500 mt-0.5">CRM {doc.crm}</p>
                           </div>
 
-                          <div className="flex items-center gap-2.5 shrink-0">
-                            <select
+                          <div className="flex items-center gap-3 shrink-0">
+                            {/* Primary Shift Select */}
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Período Diurno</span>
+                              <select
+                                disabled={session.perfil !== 'administrador'}
+                                value={primaryVal}
+                                onChange={(e) => handlePrimaryChange(doc.id, e.target.value)}
+                                className="px-2.5 py-1 text-[10px] font-bold text-slate-700 bg-white border border-slate-250 rounded-md focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
+                              >
+                                <option value="12h">Integral (12h)</option>
+                                <option value="6h-manha">Manhã (6h)</option>
+                                <option value="6h-tarde">Tarde (6h)</option>
+                                <option value="none">Apenas Extendido (Noite)</option>
+                              </select>
+                            </div>
+
+                            {/* Extendido Concurrent Checkbox */}
+                            <button
+                              type="button"
                               disabled={session.perfil !== 'administrador'}
-                              value={activeShiftType}
-                              onChange={(e) => handleChangeShiftType(doc.id, e.target.value as any)}
-                              className="px-2.5 py-1 text-[10px] font-bold text-slate-700 bg-white border border-slate-250 rounded-md focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
+                              onClick={() => handleToggleExtendidoLocal(doc.id)}
+                              className={`px-2.5 py-1 text-[10px] font-bold rounded-md border flex items-center gap-1.5 transition-all cursor-pointer ${
+                                hasExtendido
+                                  ? 'bg-blue-50 border-blue-200 text-blue-700 font-extrabold'
+                                  : 'bg-white border-slate-250 text-slate-500 hover:bg-slate-50'
+                              }`}
+                              title="Permitir plantão extendido (19:00h às 23:59h) em paralelo"
                             >
-                              <option value="12h">Integral (12h)</option>
-                              <option value="6h-manha">Manhã (6h - 07h às 13h)</option>
-                              <option value="6h-tarde">Tarde (6h - 13h às 19h)</option>
-                            </select>
+                              <Clock3 className={`h-3.5 w-3.5 ${hasExtendido ? 'text-blue-600' : 'text-slate-400'}`} />
+                              <span>Extendido</span>
+                              <div className={`w-2 h-2 rounded-full ${hasExtendido ? 'bg-blue-600 animate-pulse' : 'bg-slate-350'}`} />
+                            </button>
 
                             {session.perfil === 'administrador' && (
                               <button
@@ -683,7 +877,17 @@ export default function PlantaoTab({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {selectedDoctorsList.map(doc => {
                   const isCoord = tempCoordinatorIds.includes(doc.id);
-                  const shiftText = tempShiftTypes[doc.id] === '12h' ? 'Integral 12h' : tempShiftTypes[doc.id] === '6h-manha' ? 'Manhã 6h' : 'Tarde 6h';
+                  const getShiftText = (val: string) => {
+                    if (!val) return 'Personalizado';
+                    const parts = val.split(',');
+                    const out: string[] = [];
+                    if (parts.includes('12h')) out.push('Integral 12h');
+                    if (parts.includes('6h-manhã') || parts.includes('6h-manha')) out.push('Manhã 6h');
+                    if (parts.includes('6h-tarde')) out.push('Tarde 6h');
+                    if (parts.includes('extendido')) out.push('Extendido 19h-24h');
+                    return out.length > 0 ? out.join(' + ') : 'Personalizado';
+                  };
+                  const shiftText = getShiftText(tempShiftTypes[doc.id] || '12h');
                   
                   return (
                     <div
@@ -838,7 +1042,17 @@ export default function PlantaoTab({
 
                 <div className="border border-slate-150 rounded-xl divide-y divide-slate-100 max-h-[170px] overflow-y-auto pr-1 bg-slate-50/30">
                   {selectedDoctorsList.map(doc => {
-                    const regimeStr = tempShiftTypes[doc.id] === '12h' ? 'Integral 12h' : tempShiftTypes[doc.id] === '6h-manha' ? 'Período Manhã (6h)' : 'Período Tarde (6h)';
+                    const currentShiftVal = tempShiftTypes[doc.id] || '12h';
+                    const getRegimeStr = (val: string) => {
+                      const parts = val.split(',');
+                      const out: string[] = [];
+                      if (parts.includes('12h')) out.push('Integral 12h');
+                      if (parts.includes('6h-manha') || parts.includes('6h-manhã')) out.push('Manhã 6h');
+                      if (parts.includes('6h-tarde')) out.push('Tarde 6h');
+                      if (parts.includes('extendido')) out.push('Extendido 19-24h');
+                      return out.length > 0 ? out.join(' + ') : 'Personalizado';
+                    };
+                    const regimeStr = getRegimeStr(currentShiftVal);
                     const isAlsoCoord = tempCoordinatorIds.includes(doc.id);
                     return (
                       <div key={doc.id} className="p-2 flex items-center justify-between gap-3 text-[11px]">
@@ -849,9 +1063,7 @@ export default function PlantaoTab({
                           </p>
                           <p className="text-[9px] font-mono text-slate-500">CRM {doc.crm}</p>
                         </div>
-                        <span className={`px-2 py-0.5 rounded font-black text-[9px] uppercase ${
-                          tempShiftTypes[doc.id] === '12h' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700'
-                        }`}>
+                        <span className="px-2 py-0.5 rounded font-black text-[9px] uppercase bg-blue-50 text-blue-700 border border-blue-200">
                           {regimeStr}
                         </span>
                       </div>
@@ -924,6 +1136,107 @@ export default function PlantaoTab({
                     </div>
                   </div>
                 </div>
+
+                {/* Automation & Replication Selector Panel */}
+                {session.perfil === 'administrador' && (
+                  <div className="bg-slate-50 border border-slate-205 p-3.5 rounded-xl space-y-2.5 mt-4" id="confirm-replicate-block">
+                    <div className="flex items-center gap-2">
+                      <span className="p-1 px-1.5 rounded bg-blue-105 text-blue-800 text-[8px] font-black uppercase tracking-wider font-sans">Mecanismo</span>
+                      <label className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1">
+                        <Repeat className="h-3.5 w-3.5 text-blue-600 animate-spin-slow" /> Replicar esta Escala
+                      </label>
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-normal font-medium">
+                      Diminua custos operacionais e evite retrabalho copiando a equipe definida para datas ou semanas futuras.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-1.5 text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReplicateWeekly(!replicateWeekly);
+                          if (replicateSpecificDates) setReplicateSpecificDates(false);
+                        }}
+                        className={`py-1.5 px-2 text-[10px] font-extrabold uppercase tracking-wide rounded-lg border text-center transition-all cursor-pointer ${
+                          replicateWeekly
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-3xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Repetir Semanalmente
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReplicateSpecificDates(!replicateSpecificDates);
+                          if (replicateWeekly) setReplicateWeekly(false);
+                        }}
+                        className={`py-1.5 px-2 text-[10px] font-extrabold uppercase tracking-wide rounded-lg border text-center transition-all cursor-pointer ${
+                          replicateSpecificDates
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-3xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Datas Específicas
+                      </button>
+                    </div>
+
+                    {replicateWeekly && (
+                      <div className="p-2.5 bg-white border border-slate-150 rounded-lg space-y-1.5 animate-fade-in text-[10px]">
+                        <label className="block font-black text-slate-700 uppercase">
+                          Repetir por quantas semanas consecutivas?
+                        </label>
+                        <select
+                          value={replicateWeeksCount}
+                          onChange={(e) => setReplicateWeeksCount(parseInt(e.target.value))}
+                          className="w-full text-xs px-2 py-1.5 border border-slate-205 rounded bg-white text-slate-800 font-bold focus:ring-1 focus:ring-blue-600 cursor-pointer"
+                        >
+                          <option value="4">Próximas 4 semanas (1 mês)</option>
+                          <option value="8">Próximas 8 semanas (2 meses)</option>
+                          <option value="12">Próximas 12 semanas (3 meses)</option>
+                          <option value="24">Indefinidamente (6 meses de salvaguarda - 24 semanas)</option>
+                        </select>
+                        <p className="text-[9px] text-slate-400 italic">
+                          Cria equipes duplicadas para as próximas {replicateWeeksCount} semanas operacionais às {selectedDate.split('-').reverse().slice(0, 1).join('/')} (mesmo dia da semana).
+                        </p>
+                      </div>
+                    )}
+
+                    {replicateSpecificDates && (
+                      <div className="p-2.5 bg-white border border-slate-150 rounded-lg space-y-2 animate-fade-in text-[10px]">
+                        <label className="block font-black text-slate-700 uppercase">
+                          Adicionar data de destino:
+                        </label>
+                        <input
+                          type="date"
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val && !specificDestDates.includes(val)) {
+                              setSpecificDestDates(prev => [...prev, val]);
+                            }
+                          }}
+                          className="w-full text-xs px-2 py-1 border border-slate-205 rounded font-mono text-slate-800 bg-slate-50 cursor-pointer"
+                        />
+                        {specificDestDates.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-1.5 max-h-24 overflow-y-auto">
+                            {specificDestDates.map(dStr => (
+                              <span key={dStr} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 font-mono text-[9px] text-blue-800 font-bold">
+                                {dStr.split('-').reverse().slice(0, 2).join('/')}
+                                <button
+                                  type="button"
+                                  onClick={() => setSpecificDestDates(prev => prev.filter(x => x !== dStr))}
+                                  className="text-slate-450 hover:text-rose-600 font-black cursor-pointer bg-transparent border-none text-[11px]"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Confirm submit actions */}
@@ -964,120 +1277,307 @@ export default function PlantaoTab({
           </div>
         )}
 
+        </div>
       </div>
-
-      {/* COMPACT CHECKLIST MONTHLY CALENDAR GRID BELOW (Admin only checklist visual preview) */}
-      {session.perfil === 'administrador' && (
-        <section className="bg-white rounded-xl border border-slate-250 p-4 shadow-3xs max-w-sm mx-auto space-y-3" id="compact-calendar-reference">
-          <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+      ) : (
+      // ================= SUB-TAB: CALENDÁRIO MENSUAL HOVERÁVEL =================
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in" id="calendario-sub-tab">
+        {/* Calendario Grid (Left Column - 8 cols) */}
+        <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 p-6 shadow-3xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div>
-              <h3 className="text-xs font-black text-slate-900 font-display flex items-center gap-1.5 uppercase tracking-tight">
-                <Calendar className="h-4 w-4 text-blue-600" />
-                Mapa de Roteiros Confirmados
+              <h3 className="text-base font-black text-slate-900 font-display flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-blue-600" />
+                Calendário de Escalas Mensais
               </h3>
-              <p className="text-[10px] text-slate-500 font-medium leading-tight">
-                Consulte ou modifique o planejamento de escalas do mês.
+              <p className="text-xs text-slate-500 font-medium">
+                Selecione um dia para detalhes e passe o mouse sobre os dias para inspecionar escalas em tempo real.
               </p>
             </div>
 
             {/* Navigation Controls */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2 self-start sm:self-center">
               <button
                 onClick={handlePrevMonth}
-                className="p-1 border border-slate-200 rounded-md hover:bg-slate-50 text-slate-600 transition-colors cursor-pointer"
+                className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors cursor-pointer"
                 title="Mês Anterior"
               >
-                <ChevronLeft className="h-3.5 w-3.5" />
+                <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="text-[11px] font-black text-slate-800 font-display min-w-[85px] text-center">
+              <span className="text-sm font-black text-slate-800 font-display min-w-[124px] text-center bg-slate-50 border border-slate-200 py-1.5 px-3 rounded-xl font-mono">
                 {monthLabel}
               </span>
               <button
                 onClick={handleNextMonth}
-                className="p-1 border border-slate-200 rounded-md hover:bg-slate-50 text-slate-600 transition-colors cursor-pointer"
+                className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors cursor-pointer"
                 title="Próximo Mês"
               >
-                <ChevronRight className="h-3.5 w-3.5" />
+                <ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
 
           {/* Weekday labels */}
-          <div className="grid grid-cols-7 gap-1 text-center text-[9px] font-black text-slate-400 uppercase tracking-wider py-1 bg-slate-50/50 rounded-lg">
-            <div>D</div>
-            <div>S</div>
-            <div>T</div>
-            <div>Q</div>
-            <div>Q</div>
-            <div>S</div>
-            <div>S</div>
+          <div className="grid grid-cols-7 gap-2 text-center text-xs font-black text-slate-400 uppercase tracking-widest py-2 bg-slate-50/50 rounded-xl">
+            <div>Dom</div>
+            <div>Seg</div>
+            <div>Ter</div>
+            <div>Qua</div>
+            <div>Qui</div>
+            <div>Sex</div>
+            <div>Sáb</div>
           </div>
 
           {/* Calendar Days Grid */}
-          <div className="grid grid-cols-7 gap-1 justify-items-center">
+          <div className="grid grid-cols-7 gap-2">
             {calendarDays.map((dayItem, index) => {
               if (!dayItem) {
-                return <div key={`empty-${index}`} className="w-8 h-8 bg-transparent"></div>;
+                return <div key={`empty-${index}`} className="aspect-square bg-slate-50/10 rounded-xl border border-dashed border-slate-100"></div>;
               }
 
               const isCurrent = dayItem.dateString === selectedDate;
-              const escCount = dailyPresences.filter(p => p.date === dayItem.dateString).length;
+              const dailyPresListForTile = dailyPresences.filter(p => p.date === dayItem.dateString);
+              const escCount = dailyPresListForTile.length;
               const hasRoster = escCount > 0;
 
-              // Check if coordinator is complete
+              // Check coordinator count
               const coordsOnDay = dateCoordinators[dayItem.dateString] || [];
               const hasCoordOnDay = coordsOnDay.length > 0;
-              const coordDocName = hasCoordOnDay ? doctors.find(d => d.id === coordsOnDay[0])?.nome : null;
 
               return (
                 <div
                   key={`day-${dayItem.day}`}
                   onClick={() => {
                     setSelectedDate(dayItem.dateString);
-                    setActiveStep(1);
                   }}
-                  className={`w-8 h-8 rounded-lg border flex flex-col items-center justify-center relative cursor-pointer group transition-all text-xs ${
+                  onMouseEnter={() => {
+                    setHoveredDate(dayItem.dateString);
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredDate(null);
+                  }}
+                  className={`aspect-square rounded-xl border p-2 flex flex-col justify-between relative cursor-pointer group transition-all ${
                     isCurrent
-                      ? 'border-blue-600 bg-blue-50/30 text-blue-700 font-black ring-1 ring-blue-500/20'
+                      ? 'border-blue-600 bg-blue-50/20 text-blue-850 font-extrabold ring-2 ring-blue-500/20 shadow-xs'
                       : hasRoster
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-400 hover:bg-emerald-100 font-black'
-                        : 'border-slate-150 hover:border-slate-300 text-slate-650 hover:bg-slate-50'
+                        ? 'border-emerald-250 bg-emerald-50 text-emerald-950 hover:border-emerald-400 hover:bg-emerald-100'
+                        : 'border-slate-150 hover:border-slate-350 text-slate-700 hover:bg-slate-50'
                   }`}
-                  title={`${dayItem.day} de ${monthLabel}: ${escCount} plantonista(s) escalado(s) ${hasCoordOnDay ? `(Coordenador: ${coordDocName})` : ''}`}
                 >
-                  <span className="font-mono text-[10px]">{dayItem.day}</span>
+                  <span className="font-mono font-bold text-xs">{dayItem.day}</span>
 
-                  {/* Indicator labels */}
-                  <div className="absolute bottom-0.5 flex gap-0.5 justify-center items-center">
-                    {hasRoster && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  {/* Compact layout for counts & crowns */}
+                  <div className="flex items-center justify-between mt-auto">
+                    {hasRoster ? (
+                      <div className="flex items-center gap-1 bg-emerald-100/80 px-1.5 py-0.5 rounded text-[10px] font-black text-emerald-800 shrink-0">
+                        <Users className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>{escCount}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[9px] text-slate-400 italic">Livre</span>
                     )}
+
                     {hasCoordOnDay && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                      <Crown className="h-3.5 w-3.5 text-amber-500 fill-amber-300 animate-pulse shrink-0 ml-1" />
                     )}
                   </div>
+
+                  {/* Highlight outline on hovered day */}
+                  {hoveredDate === dayItem.dateString && (
+                    <div className="absolute inset-0 rounded-xl border-2 border-dashed border-indigo-400 pointer-events-none bg-indigo-50/10" />
+                  )}
+
+                  {/* Floating Pop-up with rostered staff on Hover */}
+                  {hoveredDate === dayItem.dateString && (
+                    <div className="absolute bottom-[105%] left-1/2 -translate-x-1/2 mb-2 w-64 bg-slate-900 border border-slate-700/80 rounded-xl shadow-xl p-3 z-50 pointer-events-none transition-all text-xs font-sans text-slate-105 flex flex-col gap-2">
+                      {/* Triangle Arrow */}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-x-6 border-x-transparent border-t-6 border-t-slate-900 pointer-events-none" />
+                      
+                      <div className="flex items-center justify-between pb-1.5 border-b border-slate-850">
+                        <span className="font-sans font-black uppercase text-[10px] tracking-wider text-slate-350">
+                          Equipe do Dia {dayItem.day}
+                        </span>
+                        <span className="font-mono text-[9px] text-slate-400">
+                          {dayItem.dateString.split('-').reverse().slice(0, 2).join('/')}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {dailyPresListForTile.length === 0 ? (
+                          <div className="text-[10px] text-slate-400 italic py-1 text-center">Nenhum plantonista escalado.</div>
+                        ) : (
+                          dailyPresListForTile.map(pres => {
+                            const doc = doctors.find(d => d.id === pres.doctorID);
+                            if (!doc) return null;
+                            const isCoord = coordsOnDay.includes(doc.id);
+
+                            const getCompactShift = (val: string) => {
+                              const parts = val.split(',');
+                              const out: string[] = [];
+                              if (parts.includes('12h')) out.push('12h');
+                              if (parts.includes('6h-manha') || parts.includes('6h-manhã')) out.push('Manhã');
+                              if (parts.includes('6h-tarde')) out.push('Tarde');
+                              if (parts.includes('extendido')) out.push('Extendido');
+                              return out.length > 0 ? out.join('+') : '12h';
+                            };
+
+                            return (
+                              <div key={pres.id} className="flex items-center justify-between gap-1 py-0.5">
+                                <span className="font-bold flex items-center gap-1 truncate max-w-[150px] text-white">
+                                  {isCoord && <Crown className="h-3 w-3 text-amber-400 fill-amber-300 shrink-0" />}
+                                  {doc.nome}
+                                </span>
+                                <span className={`px-1 py-0.5 rounded text-[8px] font-bold uppercase transition-colors shrink-0 ${
+                                  isCoord ? 'bg-amber-500 text-slate-950 font-black font-sans' : 'bg-slate-800 text-blue-300'
+                                }`}>
+                                  {getCompactShift(pres.shiftType)}
+                                </span>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
 
-          {/* Compact Legend for the admin */}
-          <div className="flex items-center justify-center gap-4 pt-2 border-t border-slate-100 text-[8px] font-black text-slate-500 uppercase tracking-widest">
+          {/* Calendar Legend */}
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-3 border-t border-slate-100 text-[10px] font-black text-slate-500 uppercase tracking-widest">
             <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              <span>Com Escala</span>
+              <span className="w-2.5 h-2.5 rounded bg-emerald-50 border border-emerald-200"></span>
+              <span>Com Plantonistas</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-              <span>Coordenador</span>
+              <Crown className="h-3.5 w-3.5 text-amber-500 fill-amber-300" />
+              <span>Possui Coordenador</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-              <span>Selecionado</span>
+              <span className="w-2.5 h-2.5 rounded border-2 border-blue-600 bg-blue-50/20"></span>
+              <span>Dia Selecionado</span>
+            </div>
+            <div className="flex items-center gap-1.5 animate-pulse">
+              <span className="w-2.5 h-2.5 rounded border-2 border-dashed border-indigo-400 bg-indigo-50/10"></span>
+              <span>Cursor (Hover)</span>
             </div>
           </div>
-        </section>
-      )}
-    </div>
+        </div>
+
+        {/* Quick Peek Details (Right Column - 4 cols) */}
+        <div className="lg:col-span-4 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-3xs space-y-4">
+            <div className="border-b border-slate-100 pb-3">
+              <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600 block mb-1">
+                {hoveredDate ? '⚡ Visualizando no Cursor' : '✓ Dia Selecionado'}
+              </span>
+              <h3 className="text-sm font-black text-slate-900 font-sans flex items-center gap-1.5">
+                <Calendar className="h-4 w-4 text-blue-650" />
+                {(hoveredDate || selectedDate).split('-').reverse().join('/')}
+              </h3>
+              <p className="text-[10.5px] text-slate-500 mt-1 font-medium leading-tight">
+                {hoveredDate 
+                  ? 'Inspecionando equipe correspondente ao dia abaixo do mouse.' 
+                  : 'Abaixo estão os profissionais confirmados para a data selecionada.'}
+              </p>
+            </div>
+
+            {/* Roster list for target date */}
+            {(() => {
+              const targetDateString = hoveredDate || selectedDate;
+              const listForDate = dailyPresences.filter(p => p.date === targetDateString);
+              const coordsOnDay = dateCoordinators[targetDateString] || [];
+
+              if (listForDate.length === 0) {
+                return (
+                  <div className="py-12 bg-slate-50 border border-dashed border-slate-200 text-center rounded-xl px-4">
+                    <ShieldAlert className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                    <p className="text-xs font-black text-slate-700">Sem Plantonistas Cadastrados</p>
+                    <p className="text-[10px] text-slate-400 mt-1 font-medium">
+                      Não existem profissionais e lideranças definidos neste dia.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    <span>Equipe ({listForDate.length})</span>
+                    <span>Período</span>
+                  </div>
+
+                  <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                    {listForDate.map(pres => {
+                      const doc = doctors.find(d => d.id === pres.doctorID);
+                      if (!doc) return null;
+                      const isCoord = coordsOnDay.includes(doc.id);
+
+                      const getRegimeStr = (val: string) => {
+                        const parts = val.split(',');
+                        const out: string[] = [];
+                        if (parts.includes('12h')) out.push('12h');
+                        if (parts.includes('6h-manha') || parts.includes('6h-manhã')) out.push('Manhã (6h)');
+                        if (parts.includes('6h-tarde')) out.push('Tarde (6h)');
+                        if (parts.includes('extendido')) out.push('Extendido (5h)');
+                        return out.length > 0 ? out.join(' + ') : '12h';
+                      };
+
+                      return (
+                        <div
+                          key={pres.id}
+                          className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs transition-colors ${
+                            isCoord 
+                              ? 'bg-amber-50 border-amber-205 text-amber-950 font-extrabold shadow-3xs' 
+                              : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="font-extrabold text-slate-850 truncate flex items-center gap-1.5">
+                              {doc.nome}
+                              {isCoord && (
+                                <Crown className="h-3 w-3 text-amber-500 fill-amber-300 shrink-0" />
+                              )}
+                            </p>
+                            <p className="text-[10px] font-mono text-slate-500 mt-0.5">CRM {doc.crm}</p>
+                          </div>
+
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                            isCoord
+                              ? 'bg-amber-600 text-white font-black'
+                              : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                          }`}>
+                            {getRegimeStr(pres.shiftType)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Editing Action redirection button */}
+            {session.perfil === 'administrador' && (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubTab('escalas');
+                    // set visual active step to 1 to guide them smoothly
+                    setActiveStep(1);
+                  }}
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider"
+                >
+                  ✎ Configurar Escala deste Dia
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
   );
 }

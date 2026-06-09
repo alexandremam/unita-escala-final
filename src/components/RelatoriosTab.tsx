@@ -271,6 +271,71 @@ export default function RelatoriosTab({ doctors, escalations, session, defaultSu
     }
   }, [doctors]);
 
+  // Equity track metrics per coordinator instructions
+  const equityKPIs = useMemo(() => {
+    // Only analyze doctors who worked hours or performed acts
+    const activeDocs = aggregatedReport.filter(d => d.horasTrabalhadas > 0 || d.atosRealizados > 0);
+    if (activeDocs.length <= 1) {
+      return {
+        hoursEquity: 100,
+        actsEquity: 100,
+        averageEquity: 100,
+        gloriousReport: "Escala Com Equidade Máxima",
+        gloriousColor: "text-emerald-700 bg-emerald-50 border-emerald-100",
+        recommendation: "Equipe com distribuição perfeita de carga de trabalho e horários."
+      };
+    }
+
+    // 1. Calculate hours equity
+    const hours = activeDocs.map(d => d.horasTrabalhadas);
+    const sumHours = hours.reduce((s, x) => s + x, 0);
+    const meanHours = sumHours / hours.length;
+    let stdevHours = 0;
+    if (meanHours > 0) {
+      const varianceHours = hours.reduce((s, x) => s + Math.pow(x - meanHours, 2), 0) / hours.length;
+      stdevHours = Math.sqrt(varianceHours);
+    }
+    const cvHours = meanHours > 0 ? (stdevHours / meanHours) : 0;
+    const hoursEquity = Math.max(0, Math.min(100, Math.round((1 - Math.min(1, cvHours)) * 100)));
+
+    // 2. Calculate acts equity
+    const acts = activeDocs.map(d => d.atosRealizados);
+    const sumActs = acts.reduce((s, x) => s + x, 0);
+    const meanActs = sumActs / acts.length;
+    let stdevActs = 0;
+    if (meanActs > 0) {
+      const varianceActs = acts.reduce((s, x) => s + Math.pow(x - meanActs, 2), 0) / acts.length;
+      stdevActs = Math.sqrt(varianceActs);
+    }
+    const cvActs = meanActs > 0 ? (stdevActs / meanActs) : 0;
+    const actsEquity = Math.max(0, Math.min(100, Math.round((1 - Math.min(1, cvActs)) * 100)));
+
+    const averageEquity = Math.round((hoursEquity + actsEquity) / 2);
+
+    let gloriousReport = "Excelente Equidade";
+    let gloriousColor = "text-emerald-700 bg-emerald-50 border-emerald-200";
+    let recommendation = "Parabéns! A escala está com excelente equilíbrio, garantindo distribuição saudável e isonômica de procedimentos anestésicos e tempo operacional.";
+
+    if (averageEquity < 50) {
+      gloriousReport = "Alta Desigualdade (Sugere Atenção)";
+      gloriousColor = "text-rose-700 bg-rose-50 border-rose-200";
+      recommendation = "Aviso de Sobrecarga Localizada: Verifique a distribuição. Certos anestesistas estão acumulando mais de 60% das escalas do centro cirúrgico.";
+    } else if (averageEquity < 80) {
+      gloriousReport = "Distribuição Moderadamente Balanceada";
+      gloriousColor = "text-amber-700 bg-amber-50 border-amber-200";
+      recommendation = "Escala Aceitável. É recomendável rotacionar postos e procedimentos nas próximas escalas para manter o engajamento e a justiça de honorários.";
+    }
+
+    return {
+      hoursEquity,
+      actsEquity,
+      averageEquity,
+      gloriousReport,
+      gloriousColor,
+      recommendation
+    };
+  }, [aggregatedReport]);
+
   // Audit list filtering logic
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
@@ -460,6 +525,89 @@ export default function RelatoriosTab({ doctors, escalations, session, defaultSu
                 <span className="block text-[9px] text-slate-450 leading-tight leading-none truncate">
                   {activeDoctorsCount} de {doctors.length} médicos atuando
                 </span>
+              </div>
+            </div>
+          </div>
+
+          {/* KPI DE EQUIDADE E DISTRIBUIÇÃO JUSTA OPERACIONAL */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-white border border-slate-200 p-5 rounded-2xl shadow-3xs no-print" id="equilibrium-kpi-block">
+            {/* Meter */}
+            <div className="md:col-span-5 flex flex-col items-center justify-center text-center p-3.5 border-r border-slate-100 lg:pr-6">
+              <div className="relative flex items-center justify-center">
+                {/* Visual circle trail */}
+                <svg className="w-24 h-24 transform -rotate-90">
+                  <circle cx="48" cy="48" r="42" stroke="#f1f5f9" strokeWidth="6" fill="transparent" />
+                  <circle
+                    cx="48"
+                    cy="48"
+                    r="42"
+                    stroke={equityKPIs.averageEquity > 75 ? "#10b981" : equityKPIs.averageEquity > 45 ? "#f59e0b" : "#ef4444"}
+                    strokeWidth="8"
+                    fill="transparent"
+                    strokeDasharray={2 * Math.PI * 42}
+                    strokeDashoffset={2 * Math.PI * 42 * (1 - equityKPIs.averageEquity / 100)}
+                    className="transition-all duration-1000 ease-out"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="absolute flex flex-col items-center justify-center select-none">
+                  <span className="text-2xl font-black text-slate-800 font-mono tracking-tight">{equityKPIs.averageEquity}%</span>
+                  <span className="text-[8.5px] text-slate-400 font-black uppercase tracking-wider">Índice Isonômico</span>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-1">
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Equidade Clinica Operacional</h4>
+                <div className={`text-[10px] p-1 px-2.5 rounded-full font-black border uppercase tracking-wide inline-block ${equityKPIs.gloriousColor}`}>
+                  {equityKPIs.gloriousReport}
+                </div>
+              </div>
+            </div>
+
+            {/* Explanations & Bars */}
+            <div className="md:col-span-7 flex flex-col justify-between p-1 space-y-4">
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-black uppercase text-blue-700 tracking-widest flex items-center gap-1.5 font-sans">
+                  <Sparkles className="h-3.5 w-3.5 text-blue-605 animate-pulse" /> Governança de Equidade & Distribuição Justa
+                </span>
+                <h3 className="text-sm font-black text-slate-850 tracking-tight leading-snug">Metodologia Científica com Desvio Padrão</h3>
+                <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
+                  O sistema avalia a isonomia da escala cruzando o Coefficient of Variation (CV) de horas faturadas com a contagem de procedimentos anestésicos concluídos. Valores próximos a 100% indicam divisão perfeita e justa do esforço operacional.
+                </p>
+              </div>
+
+              {/* Progress bars indicator */}
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center text-[10.5px] font-bold text-slate-700">
+                    <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5 text-slate-400" /> Distribuição de Horas no Turno</span>
+                    <span className="font-mono text-slate-900 font-black">{equityKPIs.hoursEquity}%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                    <div 
+                      style={{ width: `${equityKPIs.hoursEquity}%` }} 
+                      className="bg-blue-600 h-full rounded-full transition-all duration-700" 
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center text-[10.5px] font-bold text-slate-700">
+                    <span className="flex items-center gap-1"><Activity className="h-3.5 w-3.5 text-slate-400" /> Freqüência de Atos Anestésicos</span>
+                    <span className="font-mono text-slate-900 font-black">{equityKPIs.actsEquity}%</span>
+                  </div>
+                  <div className="w-full bg-slate-105 h-2 rounded-full overflow-hidden">
+                    <div 
+                      style={{ width: `${equityKPIs.actsEquity}%` }} 
+                      className="bg-emerald-600 h-full rounded-full transition-all duration-700" 
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Recommendation message block */}
+              <div className="p-3 bg-slate-50 border border-slate-150 rounded-xl text-[10.5px] leading-relaxed text-slate-600 font-medium">
+                <strong className="text-slate-800">Diretriz Governamental de Escala:</strong> {equityKPIs.recommendation}
               </div>
             </div>
           </div>

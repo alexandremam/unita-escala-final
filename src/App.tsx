@@ -20,6 +20,7 @@ export default function App() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('agora');
   const [relatoriosSubTab, setRelatoriosSubTab] = useState<'desempenho' | 'auditoria' | 'uti'>('desempenho');
+  const [plantaoSubTab, setPlantaoSubTab] = useState<'calendario' | 'escalas'>('calendario');
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [escalations, setEscalations] = useState<Escalation[]>([]);
   const [dailyPresences, setDailyPresences] = useState<DailyPresence[]>([]);
@@ -103,6 +104,8 @@ export default function App() {
           session={session}
           activeSubTab={relatoriosSubTab}
           setActiveSubTab={setRelatoriosSubTab}
+          plantaoSubTab={plantaoSubTab}
+          setPlantaoSubTab={setPlantaoSubTab}
         />
 
         {/* Content panel, shifted 64px (pl-16) to account for collapsed sidebar gutter */}
@@ -129,6 +132,8 @@ export default function App() {
                 setSession={setSession}
                 dailyPresences={dailyPresences}
                 setDailyPresences={setDailyPresences}
+                subTab={plantaoSubTab}
+                setSubTab={setPlantaoSubTab}
               />
             )}
 
